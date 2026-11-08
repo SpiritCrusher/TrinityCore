@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,15 +16,24 @@
  */
 
 #include "ScriptMgr.h"
+#include "Creature.h"
+#include "CreatureAI.h"
+#include "GameObject.h"
 #include "InstanceScript.h"
-#include "ScriptedCreature.h"
+#include "Map.h"
 #include "shadow_labyrinth.h"
 
-DoorData const doorData[] =
+static constexpr DoorData doorData[] =
 {
     { GO_REFECTORY_DOOR,        DATA_BLACKHEART_THE_INCITER,    DOOR_TYPE_PASSAGE },
     { GO_SCREAMING_HALL_DOOR,   DATA_GRANDMASTER_VORPIL,        DOOR_TYPE_PASSAGE },
-    { 0,                        0,                              DOOR_TYPE_ROOM } // END
+    { 0,                        0,                              DOOR_TYPE_ROOM    } // END
+};
+
+static constexpr ObjectData creatureData[] =
+{
+    { NPC_BLACKHEART,          DATA_BLACKHEART_THE_INCITER },
+    { 0,                       0                           } // END
 };
 
 class instance_shadow_labyrinth : public InstanceMapScript
@@ -34,17 +43,20 @@ class instance_shadow_labyrinth : public InstanceMapScript
 
         struct instance_shadow_labyrinth_InstanceMapScript : public InstanceScript
         {
-            instance_shadow_labyrinth_InstanceMapScript(Map* map) : InstanceScript(map)
+            instance_shadow_labyrinth_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
                 SetHeaders(DataHeader);
                 SetBossNumber(EncounterCount);
                 LoadDoorData(doorData);
+                LoadObjectData(creatureData, nullptr);
 
                 FelOverseerCount      = 0;
             }
 
             void OnCreatureCreate(Creature* creature) override
             {
+                InstanceScript::OnCreatureCreate(creature);
+
                 switch (creature->GetEntry())
                 {
                     case NPC_AMBASSADOR_HELLMAW:

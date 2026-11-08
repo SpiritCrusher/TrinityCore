@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,15 +18,13 @@
 #ifndef _INSTANCESAVEMGR_H
 #define _INSTANCESAVEMGR_H
 
+#include "Define.h"
+#include "DBCEnums.h"
+#include "Hash.h"
 #include <list>
 #include <map>
 #include <mutex>
 #include <unordered_map>
-
-#include "Define.h"
-#include "DatabaseEnv.h"
-#include "DBCEnums.h"
-#include "ObjectDefines.h"
 
 struct InstanceTemplate;
 struct MapEntry;
@@ -41,7 +38,7 @@ class Group;
     - player-instance binds for permanent heroic/raid saves
     - group-instance binds (both solo and permanent) cache the player binds for the group leader
 */
-class InstanceSave
+class TC_GAME_API InstanceSave
 {
     friend class InstanceSaveManager;
     public:
@@ -55,8 +52,8 @@ class InstanceSave
            or when the instance is reset */
         ~InstanceSave();
 
-        uint8 GetPlayerCount() const { return m_playerList.size(); }
-        uint8 GetGroupCount() const { return m_groupList.size(); }
+        uint32 GetPlayerCount() const { return uint32(m_playerList.size()); }
+        uint32 GetGroupCount() const { return uint32(m_groupList.size()); }
 
         /* A map corresponding to the InstanceId/MapId does not always exist.
         InstanceSave objects may be created on player logon but the maps are
@@ -118,7 +115,7 @@ class InstanceSave
 
         /* currently it is possible to omit this information from this structure
            but that would depend on a lot of things that can easily change in future */
-        Difficulty GetDifficulty() const { return m_difficulty; }
+        Difficulty GetDifficultyID() const { return m_difficulty; }
 
         typedef std::list<Player*> PlayerListType;
         typedef std::list<Group*> GroupListType;
@@ -145,9 +142,9 @@ class InstanceSave
         std::mutex _playerListLock;
 };
 
-typedef std::unordered_map<uint32 /*PAIR32(map, difficulty)*/, time_t /*resetTime*/> ResetTimeByMapDifficultyMap;
+typedef std::unordered_map<std::pair<uint32, Difficulty>, time_t /*resetTime*/> ResetTimeByMapDifficultyMap;
 
-class InstanceSaveManager
+class TC_GAME_API InstanceSaveManager
 {
     friend class InstanceSave;
 
@@ -167,14 +164,14 @@ class InstanceSaveManager
         struct InstResetEvent
         {
             uint8 type;
-            Difficulty difficulty:8;
-            uint16 mapid;
-            uint16 instanceId;
+            Difficulty difficulty;
+            uint32 mapid;
+            uint32 instanceId;
 
             InstResetEvent() : type(0), difficulty(DUNGEON_DIFFICULTY_NORMAL), mapid(0), instanceId(0) { }
-            InstResetEvent(uint8 t, uint32 _mapid, Difficulty d, uint16 _instanceid)
+            InstResetEvent(uint8 t, uint32 _mapid, Difficulty d, uint32 _instanceid)
                 : type(t), difficulty(d), mapid(_mapid), instanceId(_instanceid) { }
-            bool operator == (const InstResetEvent& e) const { return e.instanceId == instanceId; }
+            bool operator==(InstResetEvent const& e) const { return e.instanceId == instanceId; }
         };
         typedef std::multimap<time_t /*resetTime*/, InstResetEvent> ResetTimeQueue;
 
@@ -183,7 +180,7 @@ class InstanceSaveManager
         void LoadResetTimes();
         time_t GetResetTimeFor(uint32 mapid, Difficulty d) const
         {
-            ResetTimeByMapDifficultyMap::const_iterator itr  = m_resetTimeByMapDifficulty.find(MAKE_PAIR32(mapid, d));
+            ResetTimeByMapDifficultyMap::const_iterator itr = m_resetTimeByMapDifficulty.find({ mapid, d });
             return itr != m_resetTimeByMapDifficulty.end() ? itr->second : 0;
         }
         time_t GetSubsequentResetTime(uint32 mapid, Difficulty difficulty, time_t resetTime) const;
@@ -191,16 +188,11 @@ class InstanceSaveManager
         // Use this on startup when initializing reset times
         void InitializeResetTimeFor(uint32 mapid, Difficulty d, time_t t)
         {
-            m_resetTimeByMapDifficulty[MAKE_PAIR32(mapid, d)] = t;
+            m_resetTimeByMapDifficulty[{ mapid, d }] = t;
         }
 
         // Use this only when updating existing reset times
-        void SetResetTimeFor(uint32 mapid, Difficulty d, time_t t)
-        {
-            ResetTimeByMapDifficultyMap::iterator itr = m_resetTimeByMapDifficulty.find(MAKE_PAIR32(mapid, d));
-            ASSERT(itr != m_resetTimeByMapDifficulty.end());
-            itr->second = t;
-        }
+        void SetResetTimeFor(uint32 mapid, Difficulty d, time_t t);
 
         ResetTimeByMapDifficultyMap const& GetResetTimeMap() const
         {

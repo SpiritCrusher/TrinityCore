@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -18,11 +18,15 @@
 #ifndef _TICKETMGR_H
 #define _TICKETMGR_H
 
-#include <string>
-
-#include "ObjectMgr.h"
+#include "ObjectGuid.h"
+#include "DatabaseEnvFwd.h"
+#include "Position.h"
+#include <map>
+#include <span>
 
 class ChatHandler;
+class Player;
+class WorldSession;
 
 // from blizzard lua
 enum GMTicketSystemStatus
@@ -84,7 +88,7 @@ enum TicketType
     TICKET_TYPE_CHARACTER_DELETED = 2,
 };
 
-class GmTicket
+class TC_GAME_API GmTicket
 {
 public:
     GmTicket();
@@ -97,22 +101,16 @@ public:
     bool IsAssigned() const { return !_assignedTo.IsEmpty(); }
     bool IsAssignedTo(ObjectGuid guid) const { return guid == _assignedTo; }
     bool IsAssignedNotTo(ObjectGuid guid) const { return IsAssigned() && !IsAssignedTo(guid); }
+    bool IsViewed() const { return _viewed; }
 
     uint32 GetId() const { return _id; }
-    Player* GetPlayer() const { return ObjectAccessor::FindPlayer(_playerGuid); }
+    Player* GetPlayer() const;
     std::string const& GetPlayerName() const { return _playerName; }
-    std::string const& GetMessage() const { return _message; }
-    Player* GetAssignedPlayer() const { return ObjectAccessor::FindPlayer(_assignedTo); }
+    std::string const& GetMessage() const { return _description; }
+    bool GetNeedMoreHelp() const { return _needMoreHelp; }
+    Player* GetAssignedPlayer() const;
     ObjectGuid GetAssignedToGUID() const { return _assignedTo; }
-    std::string GetAssignedToName() const
-    {
-        std::string name;
-        // save queries if ticket is not assigned
-        if (_assignedTo)
-            sObjectMgr->GetPlayerNameByGUID(_assignedTo, name);
-
-        return name;
-    }
+    std::string GetAssignedToName() const;
     uint64 GetLastModifiedTime() const { return _lastModifiedTime; }
     GMTicketEscalationStatus GetEscalatedStatus() const { return _escalatedStatus; }
 
@@ -128,31 +126,26 @@ public:
     void SetClosedBy(ObjectGuid value) { _closedBy = value; _type = TICKET_TYPE_CLOSED; }
     void SetResolvedBy(ObjectGuid value) { _resolvedBy = value; }
     void SetCompleted() { _completed = true; }
-    void SetMessage(std::string const& message)
-    {
-        _message = message;
-        _lastModifiedTime = uint64(time(NULL));
-    }
+    void SetDescription(std::string const& message);
     void SetComment(std::string const& comment) { _comment = comment; }
     void SetViewed() { _viewed = true; }
     void SetUnassigned();
-    void SetPosition(uint32 mapId, float x, float y, float z);
+    void SetPosition(uint32 mapId, Position const& pos);
     void SetGmAction(uint32 needResponse, bool needMoreHelp);
 
     void AppendResponse(std::string const& response) { _response += response; }
 
     bool LoadFromDB(Field* fields);
-    void SaveToDB(SQLTransaction& trans) const;
+    void SaveToDB(CharacterDatabaseTransaction trans) const;
     void DeleteFromDB();
 
-    void WritePacket(WorldPacket& data) const;
     void SendResponse(WorldSession* session) const;
 
     void TeleportTo(Player* player) const;
     std::string FormatMessageString(ChatHandler& handler, bool detailed = false) const;
-    std::string FormatMessageString(ChatHandler& handler, const char* szClosedName, const char* szAssignedToName, const char* szUnassignedName, const char* szDeletedName, const char* szCompletedName) const;
+    std::string FormatMessageString(ChatHandler& handler, char const* closedName, char const* assignedToName, char const* unassignedName, char const* deletedName, char const* completedName) const;
 
-    void SetChatLog(std::list<uint32> time, std::string const& log);
+    void SetChatLog(std::span<uint32 const> times, std::string const& log);
     std::string const& GetChatLog() const { return _chatLog; }
 
 private:
@@ -160,11 +153,9 @@ private:
     TicketType _type; // 0 = Open, 1 = Closed, 2 = Character deleted
     ObjectGuid _playerGuid;
     std::string _playerName;
-    float _posX;
-    float _posY;
-    float _posZ;
     uint16 _mapId;
-    std::string _message;
+    Position _pos;
+    std::string _description;
     uint64 _createTime;
     uint64 _lastModifiedTime;
     ObjectGuid _closedBy; // 0 = Open or Closed by Console (if type = 1), playerGuid = GM who closed it or player abandoned ticket or read the GM response message.
@@ -181,7 +172,7 @@ private:
 };
 typedef std::map<uint32, GmTicket*> GmTicketList;
 
-class TicketMgr
+class TC_GAME_API TicketMgr
 {
 private:
     TicketMgr();
@@ -199,7 +190,7 @@ public:
         if (itr != _ticketList.end())
             return itr->second;
 
-        return NULL;
+        return nullptr;
     }
 
     GmTicket* GetTicketByPlayer(ObjectGuid playerGuid)
@@ -208,7 +199,7 @@ public:
             if (itr->second && itr->second->IsFromPlayer(playerGuid) && !itr->second->IsClosed())
                 return itr->second;
 
-        return NULL;
+        return nullptr;
     }
 
     GmTicket* GetOldestOpenTicket()
@@ -217,7 +208,7 @@ public:
             if (itr->second && !itr->second->IsClosed() && !itr->second->IsCompleted())
                 return itr->second;
 
-        return NULL;
+        return nullptr;
     }
 
     void AddTicket(GmTicket* ticket);
@@ -229,7 +220,7 @@ public:
     void SetStatus(bool status) { _status = status; }
 
     uint64 GetLastChange() const { return _lastChange; }
-    void UpdateLastChange() { _lastChange = uint64(time(NULL)); }
+    void UpdateLastChange();
 
     uint32 GenerateTicketId() { return ++_lastTicketId; }
     uint32 GetOpenTicketCount() const { return _openTicketCount; }
@@ -244,9 +235,7 @@ public:
 
     void SendTicket(WorldSession* session, GmTicket* ticket) const;
 
-protected:
-    void _RemoveTicket(uint32 ticketId, int64 source = -1, bool permanently = false);
-
+private:
     GmTicketList _ticketList;
 
     bool   _status;

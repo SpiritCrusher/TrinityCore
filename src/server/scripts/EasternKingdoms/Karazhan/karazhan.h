@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2006-2009 ScriptDev2 <https://scriptdev2.svn.sourceforge.net/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,11 +18,14 @@
 #ifndef DEF_KARAZHAN_H
 #define DEF_KARAZHAN_H
 
+#include "CreatureAIImpl.h"
+
+#define KZScriptName "instance_karazhan"
 #define DataHeader "KZ"
 
 uint32 const EncounterCount = 12;
 
-enum DataTypes
+enum KZDataTypes
 {
     DATA_ATTUMEN                    = 0,
     DATA_MOROES                     = 1,
@@ -38,12 +40,7 @@ enum DataTypes
     DATA_MALCHEZZAR                 = 10,
     DATA_NIGHTBANE                  = 11,
 
-    DATA_OPERA_OZ_DEATHCOUNT        = 14,
-
     DATA_KILREK                     = 15,
-    DATA_GO_CURTAINS                = 18,
-    DATA_GO_STAGEDOORLEFT           = 19,
-    DATA_GO_STAGEDOORRIGHT          = 20,
     DATA_GO_LIBRARY_DOOR            = 21,
     DATA_GO_MASSIVE_DOOR            = 22,
     DATA_GO_NETHER_DOOR             = 23,
@@ -53,23 +50,42 @@ enum DataTypes
     DATA_IMAGE_OF_MEDIVH            = 26,
     DATA_MASTERS_TERRACE_DOOR_1     = 27,
     DATA_MASTERS_TERRACE_DOOR_2     = 28,
-    DATA_GO_SIDE_ENTRANCE_DOOR      = 29
+    DATA_GO_BLACKENED_URN           = 30,
+
+    DATA_BARNES,
+    DATA_JULIANNE,
+    DATA_ROMULO,
+
+    DATA_OPERA_VARIATION,
+    DATA_OPERA_OZ_DEATH_COUNT,
+
+    DATA_GO_STAGE_CURTAIN,
+    DATA_GO_STAGE_DOOR_LEFT,
+    DATA_GO_STAGE_DOOR_RIGHT,
+    DATA_GO_SIDE_ENTRANCE_DOOR
 };
 
-enum OperaEvents
+enum KZOperaEvents
 {
-    EVENT_OZ                        = 1,
-    EVENT_HOOD                      = 2,
+    EVENT_HOOD                      = 1,
+    EVENT_OZ                        = 2,
     EVENT_RAJ                       = 3
 };
 
-enum MiscCreatures
+enum KZMiscCreatures
 {
     NPC_HYAKISS_THE_LURKER          = 16179,
     NPC_ROKAD_THE_RAVAGER           = 16181,
     NPC_SHADIKITH_THE_GLIDER        = 16180,
     NPC_TERESTIAN_ILLHOOF           = 15688,
     NPC_MOROES                      = 15687,
+    NPC_BARNES                      = 16812,
+    NPC_JULIANNE                    = 17534,
+    NPC_ROMULO                      = 17533,
+    NPC_NIGHTBANE                   = 17225,
+    NPC_ATTUMEN_UNMOUNTED           = 15550,
+    NPC_ATTUMEN_MOUNTED             = 16152,
+    NPC_MIDNIGHT                    = 16151,
 
     // Trash
     NPC_COLDMIST_WIDOW              = 16171,
@@ -83,7 +99,7 @@ enum MiscCreatures
     NPC_KILREK                      = 17229
 };
 
-enum GameObjectIds
+enum KZGameObjectIds
 {
     GO_STAGE_CURTAIN                = 183932,
     GO_STAGE_DOOR_LEFT              = 184278,
@@ -96,12 +112,26 @@ enum GameObjectIds
     GO_MASTERS_TERRACE_DOOR         = 184274,
     GO_MASTERS_TERRACE_DOOR2        = 184280,
     GO_SIDE_ENTRANCE_DOOR           = 184275,
-    GO_DUST_COVERED_CHEST           = 185119
+    GO_DUST_COVERED_CHEST           = 185119,
+    GO_BLACKENED_URN                = 194092
 };
 
-enum Misc
+enum KZActionIds
+{
+    ACTION_OPERA_FINISHED           = 1681200
+};
+
+enum KZMisc
 {
     OPTIONAL_BOSS_REQUIRED_DEATH_COUNT = 50
 };
+
+template <class AI, class T>
+inline AI* GetKarazhanAI(T* obj)
+{
+    return GetInstanceAI<AI>(obj, KZScriptName);
+}
+
+#define RegisterKarazhanCreatureAI(ai_name) RegisterCreatureAIWithFactory(ai_name, GetKarazhanAI)
 
 #endif

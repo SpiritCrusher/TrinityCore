@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -23,23 +23,44 @@ gets instead the deserter debuff.
 */
 
 #include "ScriptMgr.h"
+#include "Creature.h"
 #include "InstanceScript.h"
 #include "the_slave_pens.h"
+
+static constexpr ObjectData creatureData[] =
+{
+    { NPC_AHUNE,                    DATA_AHUNE             },
+    { NPC_FROZEN_CORE,              DATA_FROZEN_CORE       },
+    { NPC_AHUNE_LOC_BUNNY,          DATA_AHUNE_BUNNY       },
+    { NPC_SHAMAN_BONFIRE_BUNNY_000, DATA_BONFIRE_BUNNY_000 },
+    { NPC_SHAMAN_BONFIRE_BUNNY_001, DATA_BONFIRE_BUNNY_001 },
+    { NPC_SHAMAN_BONFIRE_BUNNY_002, DATA_BONFIRE_BUNNY_002 },
+    { NPC_SHAMAN_BEAM_BUNNY_000,    DATA_BEAM_BUNNY_000    },
+    { NPC_SHAMAN_BEAM_BUNNY_001,    DATA_BEAM_BUNNY_001    },
+    { NPC_SHAMAN_BEAM_BUNNY_002,    DATA_BEAM_BUNNY_002    },
+    { NPC_LUMA_SKYMOTHER,           DATA_LUMA_SKYMOTHER    },
+    { 0,                            0,                     }
+};
 
 class instance_the_slave_pens : public InstanceMapScript
 {
 public:
     instance_the_slave_pens() : InstanceMapScript(SPScriptName, 547) { }
 
+    struct instance_the_slave_pens_InstanceMapScript : public InstanceScript
+    {
+        instance_the_slave_pens_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
+        {
+            SetHeaders(DataHeader);
+            SetBossNumber(EncounterCount);
+            LoadObjectData(creatureData, nullptr);
+        }
+    };
+
     InstanceScript* GetInstanceScript(InstanceMap* map) const override
     {
         return new instance_the_slave_pens_InstanceMapScript(map);
     }
-
-    struct instance_the_slave_pens_InstanceMapScript : public InstanceScript
-    {
-        instance_the_slave_pens_InstanceMapScript(Map* map) : InstanceScript(map) { }
-    };
 };
 
 void AddSC_instance_the_slave_pens()

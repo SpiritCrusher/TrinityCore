@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
- * Copyright (C) 2005-2009 MaNGOS <http://getmangos.com/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,13 +15,20 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef ObjectGuid_h__
-#define ObjectGuid_h__
+#ifndef TRINITYCORE_OBJECT_GUID_H
+#define TRINITYCORE_OBJECT_GUID_H
 
-#include "Common.h"
-#include "ByteBuffer.h"
-#include <type_traits>
+#include "Define.h"
+#include "EnumFlag.h"
+#include "StringFormatFwd.h"
+#include <array>
 #include <functional>
+#include <list>
+#include <set>
+#include <string>
+#include <type_traits>
+#include <unordered_set>
+#include <vector>
 
 enum TypeID
 {
@@ -42,13 +48,15 @@ enum TypeMask
 {
     TYPEMASK_OBJECT         = 0x0001,
     TYPEMASK_ITEM           = 0x0002,
-    TYPEMASK_CONTAINER      = 0x0006,                       // TYPEMASK_ITEM | 0x0004
+    TYPEMASK_CONTAINER      = 0x0004,                       // TYPEMASK_ITEM | 0x0004
     TYPEMASK_UNIT           = 0x0008,                       // creature
     TYPEMASK_PLAYER         = 0x0010,
     TYPEMASK_GAMEOBJECT     = 0x0020,
     TYPEMASK_DYNAMICOBJECT  = 0x0040,
     TYPEMASK_CORPSE         = 0x0080,
-    TYPEMASK_SEER           = TYPEMASK_PLAYER | TYPEMASK_UNIT | TYPEMASK_DYNAMICOBJECT
+
+    TYPEMASK_SEER           = TYPEMASK_UNIT | TYPEMASK_PLAYER | TYPEMASK_DYNAMICOBJECT,
+    TYPEMASK_WORLDOBJECT    = TYPEMASK_UNIT | TYPEMASK_GAMEOBJECT | TYPEMASK_DYNAMICOBJECT | TYPEMASK_CORPSE
 };
 
 enum class HighGuid
@@ -63,84 +71,89 @@ enum class HighGuid
     Vehicle        = 0xF150,                      // blizz F550
     DynamicObject  = 0xF100,                      // blizz F100
     Corpse         = 0xF101,                      // blizz F100
-    Mo_Transport   = 0x1FC0,                      // blizz 1FC0 (for GAMEOBJECT_TYPE_MO_TRANSPORT)
+    Mo_Transport   = 0x1FC0,                      // blizz 1FC0 (for GAMEOBJECT_TYPE_MAP_OBJ_TRANSPORT)
     Instance       = 0x1F40,                      // blizz 1F40
     Group          = 0x1F50,
+};
+
+enum class ObjectGuidSequenceSource
+{
+    None    = 0x0,
+    Global  = 0x1,
+    Map     = 0x2
+};
+
+DEFINE_ENUM_FLAG(ObjectGuidSequenceSource);
+
+enum class ObjectGuidFormatType
+{
+    OnlyCounter,
+    CounterAndEntry
 };
 
 template<HighGuid high>
 struct ObjectGuidTraits
 {
-    static bool const Global = false;
-    static bool const MapSpecific = false;
+    static constexpr EnumFlag<ObjectGuidSequenceSource> SequenceSource = ObjectGuidSequenceSource::None;
+    using Format = std::integral_constant<ObjectGuidFormatType, ObjectGuidFormatType::OnlyCounter>;
 };
 
-#define GUID_TRAIT_GLOBAL(highguid) \
-    template<> struct ObjectGuidTraits<highguid> \
+#define MAKE_GUID_TRAIT(high, sequence, format) \
+    template<> struct ObjectGuidTraits<high> \
     { \
-        static bool const Global = true; \
-        static bool const MapSpecific = false; \
-    };
+        static constexpr EnumFlag<ObjectGuidSequenceSource> SequenceSource = sequence; \
+        using Format = std::integral_constant<ObjectGuidFormatType, format>; \
+    }
 
-#define GUID_TRAIT_MAP_SPECIFIC(highguid) \
-    template<> struct ObjectGuidTraits<highguid> \
-    { \
-        static bool const Global = false; \
-        static bool const MapSpecific = true; \
-    };
+MAKE_GUID_TRAIT(HighGuid::Item, ObjectGuidSequenceSource::Global, ObjectGuidFormatType::OnlyCounter);
+MAKE_GUID_TRAIT(HighGuid::Player, ObjectGuidSequenceSource::Global, ObjectGuidFormatType::OnlyCounter);
+MAKE_GUID_TRAIT(HighGuid::GameObject, ObjectGuidSequenceSource::Map, ObjectGuidFormatType::CounterAndEntry);
+MAKE_GUID_TRAIT(HighGuid::Transport, ObjectGuidSequenceSource::Map, ObjectGuidFormatType::OnlyCounter);
+MAKE_GUID_TRAIT(HighGuid::Unit, ObjectGuidSequenceSource::Map, ObjectGuidFormatType::CounterAndEntry);
+MAKE_GUID_TRAIT(HighGuid::Pet, ObjectGuidSequenceSource::Map, ObjectGuidFormatType::CounterAndEntry);
+MAKE_GUID_TRAIT(HighGuid::Vehicle, ObjectGuidSequenceSource::Map, ObjectGuidFormatType::CounterAndEntry);
+MAKE_GUID_TRAIT(HighGuid::DynamicObject, ObjectGuidSequenceSource::Map, ObjectGuidFormatType::OnlyCounter);
+MAKE_GUID_TRAIT(HighGuid::Corpse, ObjectGuidSequenceSource::Map, ObjectGuidFormatType::OnlyCounter);
+MAKE_GUID_TRAIT(HighGuid::Mo_Transport, ObjectGuidSequenceSource::Global, ObjectGuidFormatType::OnlyCounter);
+MAKE_GUID_TRAIT(HighGuid::Instance, ObjectGuidSequenceSource::Global, ObjectGuidFormatType::OnlyCounter);
+MAKE_GUID_TRAIT(HighGuid::Group, ObjectGuidSequenceSource::Global, ObjectGuidFormatType::OnlyCounter);
 
-GUID_TRAIT_GLOBAL(HighGuid::Player)
-GUID_TRAIT_GLOBAL(HighGuid::Item)
-GUID_TRAIT_GLOBAL(HighGuid::Mo_Transport)
-GUID_TRAIT_GLOBAL(HighGuid::Group)
-GUID_TRAIT_GLOBAL(HighGuid::Instance)
-GUID_TRAIT_MAP_SPECIFIC(HighGuid::Transport)
-GUID_TRAIT_MAP_SPECIFIC(HighGuid::Unit)
-GUID_TRAIT_MAP_SPECIFIC(HighGuid::Vehicle)
-GUID_TRAIT_MAP_SPECIFIC(HighGuid::Pet)
-GUID_TRAIT_MAP_SPECIFIC(HighGuid::GameObject)
-GUID_TRAIT_MAP_SPECIFIC(HighGuid::DynamicObject)
-GUID_TRAIT_MAP_SPECIFIC(HighGuid::Corpse)
-
+class ByteBuffer;
 class ObjectGuid;
 class PackedGuid;
 
 struct PackedGuidReader
 {
-    explicit PackedGuidReader(ObjectGuid& guid) : GuidPtr(&guid) { }
-    ObjectGuid* GuidPtr;
+    explicit PackedGuidReader(ObjectGuid& guid) : Guid(guid) { }
+    ObjectGuid& Guid;
 };
 
-class ObjectGuid
+struct PackedGuidWriter
+{
+    explicit PackedGuidWriter(ObjectGuid const& guid) : Guid(guid) { }
+    ObjectGuid const& Guid;
+};
+
+class TC_GAME_API ObjectGuid
 {
     public:
         static ObjectGuid const Empty;
 
         typedef uint32 LowType;
 
-        template<HighGuid type>
-        static typename std::enable_if<ObjectGuidTraits<type>::Global, ObjectGuid>::type Create(LowType counter) { return Global(type, counter); }
+        constexpr ObjectGuid() = default;
 
-        template<HighGuid type>
-        static typename std::enable_if<ObjectGuidTraits<type>::MapSpecific, ObjectGuid>::type Create(uint32 entry, LowType counter) { return MapSpecific(type, entry, counter); }
-
-        ObjectGuid() : _guid(0) { }
-        explicit ObjectGuid(uint64 guid) : _guid(guid) { }
-        ObjectGuid(HighGuid hi, uint32 entry, LowType counter) : _guid(counter ? uint64(counter) | (uint64(entry) << 24) | (uint64(hi) << 48) : 0) { }
-        ObjectGuid(HighGuid hi, LowType counter) : _guid(counter ? uint64(counter) | (uint64(hi) << 48) : 0) { }
-
-        operator uint64() const { return _guid; }
         PackedGuidReader ReadAsPacked() { return PackedGuidReader(*this); }
 
-        void Set(uint64 guid) { _guid = guid; }
+        uint64 GetRawValue() const { return _guid; }
+        void SetRawValue(uint64 guid) { _guid = guid; }
         void Clear() { _guid = 0; }
 
-        PackedGuid WriteAsPacked() const;
+        PackedGuidWriter WriteAsPacked() const { return PackedGuidWriter(*this); }
 
-        uint64   GetRawValue() const { return _guid; }
         HighGuid GetHigh() const { return HighGuid((_guid >> 48) & 0x0000FFFF); }
-        uint32   GetEntry() const { return HasEntry() ? uint32((_guid >> 24) & UI64LIT(0x0000000000FFFFFF)) : 0; }
-        LowType  GetCounter()  const
+        uint32 GetEntry() const { return HasEntry() ? uint32((_guid >> 24) & UI64LIT(0x0000000000FFFFFF)) : 0; }
+        LowType GetCounter()  const
         {
             return HasEntry()
                    ? LowType(_guid & UI64LIT(0x0000000000FFFFFF))
@@ -154,7 +167,7 @@ class ObjectGuid
                    : LowType(0xFFFFFFFF);
         }
 
-        ObjectGuid::LowType GetMaxCounter() const { return GetMaxCounter(GetHigh()); }
+        LowType GetMaxCounter() const { return GetMaxCounter(GetHigh()); }
 
         bool IsEmpty()             const { return _guid == 0; }
         bool IsCreature()          const { return GetHigh() == HighGuid::Unit; }
@@ -180,7 +193,7 @@ class ObjectGuid
             switch (high)
             {
                 case HighGuid::Item:         return TYPEID_ITEM;
-                //case HighGuid::Container:    return TYPEID_CONTAINER; HighGuid::Container==HighGuid::Item currently
+                //case HighGuid::Container:    return TYPEID_CONTAINER; HighGuid::Container == HighGuid::Item currently
                 case HighGuid::Unit:         return TYPEID_UNIT;
                 case HighGuid::Pet:          return TYPEID_UNIT;
                 case HighGuid::Player:       return TYPEID_PLAYER;
@@ -199,16 +212,22 @@ class ObjectGuid
         TypeID GetTypeId() const { return GetTypeId(GetHigh()); }
 
         bool operator!() const { return IsEmpty(); }
-        bool operator== (ObjectGuid const& guid) const { return GetRawValue() == guid.GetRawValue(); }
-        bool operator!= (ObjectGuid const& guid) const { return GetRawValue() != guid.GetRawValue(); }
-        bool operator< (ObjectGuid const& guid) const { return GetRawValue() < guid.GetRawValue(); }
+        bool operator==(ObjectGuid const& right) const = default;
+        std::strong_ordering operator<=>(ObjectGuid const& right) const = default;
 
-        static char const* GetTypeName(HighGuid high);
-        char const* GetTypeName() const { return !IsEmpty() ? GetTypeName(GetHigh()) : "None"; }
+        static std::string_view GetTypeName(HighGuid high);
+        std::string_view GetTypeName() const { return !IsEmpty() ? GetTypeName(GetHigh()) : "None"; }
         std::string ToString() const;
+        std::string ToHexString() const;
+
+        template<HighGuid type, std::enable_if_t<ObjectGuidTraits<type>::Format::value == ObjectGuidFormatType::OnlyCounter, int32> = 0>
+        static constexpr ObjectGuid Create(LowType counter) { return ObjectGuid(counter ? uint64(counter) | (uint64(type) << 48) : 0); }
+
+        template<HighGuid type, std::enable_if_t<ObjectGuidTraits<type>::Format::value == ObjectGuidFormatType::CounterAndEntry, int32> = 0>
+        static constexpr ObjectGuid Create(uint32 entry, LowType counter) { return ObjectGuid(counter ? uint64(counter) | (uint64(entry) << 24) | (uint64(type) << 48) : 0); }
 
     private:
-        static bool HasEntry(HighGuid high)
+        static constexpr bool HasEntry(HighGuid high)
         {
             switch (high)
             {
@@ -232,92 +251,75 @@ class ObjectGuid
 
         bool HasEntry() const { return HasEntry(GetHigh()); }
 
-        static ObjectGuid Global(HighGuid type, LowType counter);
-        static ObjectGuid MapSpecific(HighGuid type, uint32 entry, LowType counter);
+        explicit ObjectGuid(uint64 guid) : _guid(guid) { }
 
-        explicit ObjectGuid(uint32 const&) = delete;                 // no implementation, used to catch wrong type assignment
-        ObjectGuid(HighGuid, uint32, uint64 counter) = delete;       // no implementation, used to catch wrong type assignment
-        ObjectGuid(HighGuid, uint64 counter) = delete;               // no implementation, used to catch wrong type assignment
-
-        uint64 _guid;
+        uint64 _guid = 0;
 };
 
 // Some Shared defines
-typedef std::set<ObjectGuid> GuidSet;
-typedef std::list<ObjectGuid> GuidList;
-typedef std::deque<ObjectGuid> GuidDeque;
-typedef std::vector<ObjectGuid> GuidVector;
-typedef std::unordered_set<ObjectGuid> GuidUnorderedSet;
+using GuidSet = std::set<ObjectGuid>;
+using GuidList = std::list<ObjectGuid>;
+using GuidVector = std::vector<ObjectGuid>;
+using GuidUnorderedSet = std::unordered_set<ObjectGuid>;
 
-// minimum buffer size for packed guid is 9 bytes
+// maximum buffer size for packed guid is 9 bytes
 #define PACKED_GUID_MIN_BUFFER_SIZE 9
 
-class PackedGuid
+class TC_GAME_API PackedGuid
 {
-        friend ByteBuffer& operator<<(ByteBuffer& buf, PackedGuid const& guid);
+    friend TC_GAME_API ByteBuffer& operator<<(ByteBuffer& buf, PackedGuid const& guid);
 
     public:
-        explicit PackedGuid() : _packedGuid(PACKED_GUID_MIN_BUFFER_SIZE) { _packedGuid.appendPackGUID(0); }
-        explicit PackedGuid(uint64 guid) : _packedGuid(PACKED_GUID_MIN_BUFFER_SIZE) { _packedGuid.appendPackGUID(guid); }
-        explicit PackedGuid(ObjectGuid guid) : _packedGuid(PACKED_GUID_MIN_BUFFER_SIZE) { _packedGuid.appendPackGUID(guid.GetRawValue()); }
+        explicit PackedGuid() : _packedSize(1), _packedGuid() { }
+        explicit PackedGuid(ObjectGuid guid) { Set(guid); }
 
-        void Set(uint64 guid) { _packedGuid.wpos(0); _packedGuid.appendPackGUID(guid); }
-        void Set(ObjectGuid guid) { _packedGuid.wpos(0); _packedGuid.appendPackGUID(guid.GetRawValue()); }
+        void Set(ObjectGuid const& guid);
 
-        size_t size() const { return _packedGuid.size(); }
+        std::size_t size() const { return _packedSize; }
 
     private:
-        ByteBuffer _packedGuid;
+        uint8 _packedSize;
+        std::array<uint8, PACKED_GUID_MIN_BUFFER_SIZE> _packedGuid;
 };
 
-
-class ObjectGuidGeneratorBase
+class TC_GAME_API ObjectGuidGenerator
 {
 public:
-    ObjectGuidGeneratorBase(ObjectGuid::LowType start = 1) : _nextGuid(start) { }
+    explicit ObjectGuidGenerator(HighGuid high, ObjectGuid::LowType start = 1) : _high(high), _nextGuid(start) { }
+    ~ObjectGuidGenerator() = default;
 
-    virtual void Set(ObjectGuid::LowType val) { _nextGuid = val; }
-    virtual ObjectGuid::LowType Generate() = 0;
+    void Set(ObjectGuid::LowType val) { _nextGuid = val; }
+    ObjectGuid::LowType Generate();
     ObjectGuid::LowType GetNextAfterMaxUsed() const { return _nextGuid; }
 
 protected:
-    static void HandleCounterOverflow(HighGuid high);
+    void HandleCounterOverflow();
+    void CheckGuidTrigger();
+    HighGuid _high;
     ObjectGuid::LowType _nextGuid;
 };
 
-template<HighGuid high>
-class ObjectGuidGenerator : public ObjectGuidGeneratorBase
-{
-public:
-    explicit ObjectGuidGenerator(ObjectGuid::LowType start = 1) : ObjectGuidGeneratorBase(start) { }
+TC_GAME_API ByteBuffer& operator<<(ByteBuffer& buf, ObjectGuid const& guid);
+TC_GAME_API ByteBuffer& operator>>(ByteBuffer& buf, ObjectGuid&       guid);
 
-    ObjectGuid::LowType Generate() override
+TC_GAME_API ByteBuffer& operator<<(ByteBuffer& buf, PackedGuid const& guid);
+TC_GAME_API ByteBuffer& operator<<(ByteBuffer& buf, PackedGuidWriter const& guid);
+TC_GAME_API ByteBuffer& operator>>(ByteBuffer& buf, PackedGuidReader const& guid);
+
+template<>
+struct std::hash<ObjectGuid>
+{
+    size_t operator()(ObjectGuid const& key) const noexcept
     {
-        if (_nextGuid >= ObjectGuid::GetMaxCounter(high) - 1)
-            HandleCounterOverflow(high);
-        return _nextGuid++;
+        return std::hash<uint64>()(key.GetRawValue());
     }
 };
 
-ByteBuffer& operator<<(ByteBuffer& buf, ObjectGuid const& guid);
-ByteBuffer& operator>>(ByteBuffer& buf, ObjectGuid&       guid);
-
-ByteBuffer& operator<<(ByteBuffer& buf, PackedGuid const& guid);
-ByteBuffer& operator>>(ByteBuffer& buf, PackedGuidReader const& guid);
-
-inline PackedGuid ObjectGuid::WriteAsPacked() const { return PackedGuid(*this); }
-
-namespace std
+template <>
+struct fmt::formatter<ObjectGuid, char, void> : Trinity::NoArgFormatterBase
 {
-    template<>
-    struct hash<ObjectGuid>
-    {
-        public:
-            size_t operator()(ObjectGuid const& key) const
-            {
-                return hash<uint64>()(key.GetRawValue());
-            }
-    };
-}
+    template <typename FormatContext>
+    auto format(ObjectGuid const& guid, FormatContext& ctx) const -> decltype(ctx.out());
+};
 
-#endif // ObjectGuid_h__
+#endif // TRINITYCORE_OBJECT_GUID_H

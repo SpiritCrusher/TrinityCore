@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -19,10 +19,9 @@
 #define Realm_h__
 
 #include "Common.h"
-#include <boost/asio/ip/address.hpp>
-#include <boost/asio/ip/tcp.hpp>
-
-using namespace boost::asio;
+#include "AsioHacksFwd.h"
+#include <compare>
+#include <memory>
 
 enum RealmFlags
 {
@@ -37,49 +36,48 @@ enum RealmFlags
     REALM_FLAG_FULL             = 0x80
 };
 
-struct RealmHandle
+struct TC_SHARED_API RealmHandle
 {
     RealmHandle() : Realm(0) { }
     RealmHandle(uint32 index) : Realm(index) { }
 
     uint32 Realm;   // primary key in `realmlist` table
 
-    bool operator<(RealmHandle const& r) const
-    {
-        return Realm < r.Realm;
-    }
+    std::strong_ordering operator<=>(RealmHandle const& r) const { return Realm <=> r.Realm; }
 };
 
 /// Type of server, this is values from second column of Cfg_Configs.dbc
 enum RealmType
 {
-    REALM_TYPE_NORMAL = 0,
-    REALM_TYPE_PVP = 1,
-    REALM_TYPE_NORMAL2 = 4,
-    REALM_TYPE_RP = 6,
-    REALM_TYPE_RPPVP = 8,
+    REALM_TYPE_NORMAL       = 0,
+    REALM_TYPE_PVP          = 1,
+    REALM_TYPE_NORMAL2      = 4,
+    REALM_TYPE_RP           = 6,
+    REALM_TYPE_RPPVP        = 8,
 
-    MAX_CLIENT_REALM_TYPE = 14,
+    MAX_CLIENT_REALM_TYPE   = 14,
 
-    REALM_TYPE_FFA_PVP = 16                            // custom, free for all pvp mode like arena PvP in all zones except rest activated places and sanctuaries
-                                                       // replaced by REALM_PVP in realm list
+    REALM_TYPE_FFA_PVP      = 16                            // custom, free for all pvp mode like arena PvP in all zones except rest activated places and sanctuaries
+                                                            // replaced by REALM_PVP in realm list
 };
 
 // Storage object for a realm
-struct Realm
+struct TC_SHARED_API Realm
 {
     RealmHandle Id;
     uint32 Build;
-    ip::address ExternalAddress;
-    ip::address LocalAddress;
-    ip::address LocalSubnetMask;
+    std::unique_ptr<boost::asio::ip::address> ExternalAddress;
+    std::unique_ptr<boost::asio::ip::address> LocalAddress;
+    std::unique_ptr<boost::asio::ip::address> LocalSubnetMask;
     uint16 Port;
     std::string Name;
-    uint8 Type; // icon
+    uint8 Type;
     RealmFlags Flags;
     uint8 Timezone;
     AccountTypes AllowedSecurityLevel;
     float PopulationLevel;
+
+    boost::asio::ip::tcp_endpoint GetAddressForClient(boost::asio::ip::address const& clientAddr) const;
 };
 
 #endif // Realm_h__

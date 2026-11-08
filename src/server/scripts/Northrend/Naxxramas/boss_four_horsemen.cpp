@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -15,12 +15,18 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "Player.h"
 #include "ScriptMgr.h"
-#include "ScriptedCreature.h"
-#include "SpellScript.h"
-#include "SpellAuraEffects.h"
+#include "GameTime.h"
+#include "InstanceScript.h"
+#include "Log.h"
+#include "Map.h"
+#include "MotionMaster.h"
 #include "naxxramas.h"
+#include "ObjectAccessor.h"
+#include "Player.h"
+#include "ScriptedCreature.h"
+#include "SpellAuraEffects.h"
+#include "SpellScript.h"
 
 enum Horseman
 {
@@ -67,7 +73,7 @@ enum Actions
 
 enum HorsemenData
 {
-    DATA_HORSEMEN_IS_TIMED_KILL = Data::DATA_HORSEMEN_CHECK_ACHIEVEMENT_CREDIT, // inherit from naxxramas.h - this needs to be the first entry to ensure that there are no conflicts
+    DATA_HORSEMEN_IS_TIMED_KILL = NAXData::DATA_HORSEMEN_CHECK_ACHIEVEMENT_CREDIT, // inherit from naxxramas.h - this needs to be the first entry to ensure that there are no conflicts
     DATA_MOVEMENT_FINISHED,
     DATA_DEATH_TIME
 };
@@ -140,7 +146,7 @@ struct boss_four_horsemen_baseAI : public BossAI
                             uint32 deathTime = cBoss->AI()->GetData(DATA_DEATH_TIME);
                             if (!deathTime)
                             {
-                                TC_LOG_WARN("scripts", "FourHorsemenAI: Checking for achievement credit but horseman %s is reporting not dead", cBoss->GetName().c_str());
+                                TC_LOG_WARN("scripts", "FourHorsemenAI: Checking for achievement credit but horseman {} is reporting not dead", cBoss->GetName());
                                 return 0;
                             }
                             if (!minTime || deathTime < minTime)
@@ -150,7 +156,7 @@ struct boss_four_horsemen_baseAI : public BossAI
                         }
                         else
                         {
-                            TC_LOG_WARN("scripts", "FourHorsemenAI: Checking for achievement credit but horseman with id %u is not present", uint32(boss));
+                            TC_LOG_WARN("scripts", "FourHorsemenAI: Checking for achievement credit but horseman with id {} is not present", uint32(boss));
                             return 0;
                         }
                     return (getMSTimeDiff(minTime, maxTime) <= 15 * IN_MILLISECONDS) ? 1 : 0;
@@ -188,7 +194,7 @@ struct boss_four_horsemen_baseAI : public BossAI
                 }
                 else
                 {
-                    TC_LOG_WARN("scripts", "FourHorsemenAI: Checking if movement is finished but horseman with id %u is not present", uint32(boss));
+                    TC_LOG_WARN("scripts", "FourHorsemenAI: Checking if movement is finished but horseman with id {} is not present", uint32(boss));
                     ResetEncounter();
                     return;
                 }
@@ -209,7 +215,7 @@ struct boss_four_horsemen_baseAI : public BossAI
                 return;
             }
             instance->SetBossState(BOSS_HORSEMEN, IN_PROGRESS);
-            Map::PlayerList const &players = me->GetMap()->GetPlayers();
+            Map::PlayerList const& players = me->GetMap()->GetPlayers();
             if (players.isEmpty()) // sanity check
                 ResetEncounter();
 
@@ -225,6 +231,7 @@ struct boss_four_horsemen_baseAI : public BossAI
                     cBoss->SetReactState(REACT_PASSIVE);
                     cBoss->AttackStop(); // clear initial target that was set on enter combat
                     cBoss->setActive(true);
+                    cBoss->SetFarVisible(true);
 
                     for (Map::PlayerList::const_iterator it = players.begin(); it != players.end(); ++it)
                     {
@@ -234,11 +241,7 @@ struct boss_four_horsemen_baseAI : public BossAI
                                 continue;
 
                             if (player->IsAlive())
-                            {
-                                cBoss->AddThreat(player, 0.0f);
-                                cBoss->SetInCombatWith(player);
-                                player->SetInCombatWith(cBoss);
-                            }
+                                AddThreat(player, 0.0f, cBoss);
                         }
                     }
 
@@ -248,7 +251,7 @@ struct boss_four_horsemen_baseAI : public BossAI
                 }
                 else
                 {
-                    TC_LOG_WARN("scripts", "FourHorsemenAI: Encounter starting but horseman with id %u is not present", uint32(boss));
+                    TC_LOG_WARN("scripts", "FourHorsemenAI: Encounter starting but horseman with id {} is not present", uint32(boss));
                     ResetEncounter();
                     return;
                 }
@@ -263,14 +266,9 @@ struct boss_four_horsemen_baseAI : public BossAI
             for (Horseman boss : horsemen)
             {
                 if (Creature* cBoss = getHorsemanHandle(boss))
-                {
-                    cBoss->DespawnOrUnsummon(0);
-                    cBoss->SetRespawnTime(15);
-                }
+                    cBoss->DespawnOrUnsummon(0s, 15s);
                 else
-                {
-                    TC_LOG_WARN("scripts", "FourHorsemenAI: Encounter resetting but horseman with id %u is not present", uint32(boss));
-                }
+                    TC_LOG_WARN("scripts", "FourHorsemenAI: Encounter resetting but horseman with id {} is not present", uint32(boss));
             }
         }
 
@@ -283,9 +281,9 @@ struct boss_four_horsemen_baseAI : public BossAI
             DoCastAOE(SPELL_ENCOUNTER_CREDIT, true);
         }
 
-        void EnterCombat(Unit* /*who*/) override
+        void JustEngagedWith(Unit* /*who*/) override
         {
-            if (instance->GetBossState(BOSS_HORSEMEN) != NOT_STARTED) // another horseman already did it
+            if (instance->GetBossState(BOSS_HORSEMEN) == IN_PROGRESS || instance->GetBossState(BOSS_HORSEMEN) == DONE) // another horseman already did it
                 return;
             Talk(SAY_AGGRO);
             BeginEncounter();
@@ -327,7 +325,7 @@ struct boss_four_horsemen_baseAI : public BossAI
             }
 
             Talk(SAY_DEATH);
-            _timeDied = getMSTime();
+            _timeDied = GameTime::GetGameTimeMS();
             for (Horseman boss : horsemen)
             {
                 if (Creature* cBoss = getHorsemanHandle(boss))
@@ -341,7 +339,7 @@ struct boss_four_horsemen_baseAI : public BossAI
                 }
                 else
                 {
-                    TC_LOG_WARN("scripts", "FourHorsemenAI: %s died but horseman with id %u is not present", me->GetName().c_str(), uint32(boss));
+                    TC_LOG_WARN("scripts", "FourHorsemenAI: {} died but horseman with id {} is not present", me->GetName(), uint32(boss));
                     ResetEncounter();
                 }
             }
@@ -377,7 +375,7 @@ struct boss_four_horsemen_baseAI : public BossAI
 
     private:
         const Horseman _which;
-        const Position* _initialPath;
+        Position const* _initialPath;
         bool _myMovementFinished;
         uint8 _nextMovement;
         uint32 _timeDied;
@@ -385,373 +383,326 @@ struct boss_four_horsemen_baseAI : public BossAI
         bool _ourMovementFinished;
 };
 
-class boss_four_horsemen_baron : public CreatureScript
+struct boss_four_horsemen_baron : public boss_four_horsemen_baseAI
 {
-    public:
-        boss_four_horsemen_baron() : CreatureScript("boss_four_horsemen_baron") { }
-
-        struct boss_four_horsemen_baronAI : public boss_four_horsemen_baseAI
+    boss_four_horsemen_baron(Creature* creature) : boss_four_horsemen_baseAI(creature, BARON, baronPath) { }
+    void BeginFighting() override
+    {
+        SetCombatMovement(true);
+        me->SetReactState(REACT_AGGRESSIVE);
+        ThreatManager& threat = me->GetThreatManager();
+        if (threat.IsThreatListEmpty())
         {
-            boss_four_horsemen_baronAI(Creature* creature) : boss_four_horsemen_baseAI(creature, BARON, baronPath) { }
-            void BeginFighting() override
+            if (Unit* nearest = me->SelectNearestPlayer(5000.0f))
             {
-                SetCombatMovement(true);
-                me->SetReactState(REACT_AGGRESSIVE);
-                ThreatManager& threat = me->getThreatManager();
-                if (threat.isThreatListEmpty())
-                {
-                    if (Unit* nearest = me->SelectNearestPlayer(5000.0f))
-                    {
-                        me->AddThreat(nearest, 1.0f);
-                        AttackStart(nearest);
-                    }
-                    else
-                        ResetEncounter();
-                }
-                else
-                    AttackStart(threat.getHostilTarget());
-
-                events.ScheduleEvent(EVENT_BERSERK, 10 * MINUTE * IN_MILLISECONDS);
-                events.ScheduleEvent(EVENT_MARK, 24 * IN_MILLISECONDS);
-                events.ScheduleEvent(EVENT_UNHOLYSHADOW, urandms(3,7));
+                AddThreat(nearest, 1.0f);
+                AttackStart(nearest);
             }
-
-            void _UpdateAI(uint32 diff) override
-            {
-                if (!_ourMovementFinished || !UpdateVictim())
-                    return;
-                events.Update(diff);
-
-                while (uint32 eventId = events.ExecuteEvent())
-                {
-                    switch (eventId)
-                    {
-                        case EVENT_BERSERK:
-                            DoCastAOE(SPELL_BERSERK, true);
-                            break;
-                        case EVENT_MARK:
-                            DoCastAOE(SPELL_BARON_MARK, true);
-                            events.ScheduleEvent(EVENT_MARK, 12 * IN_MILLISECONDS);
-                            break;
-                        case EVENT_UNHOLYSHADOW:
-                            DoCastVictim(SPELL_UNHOLY_SHADOW);
-                            events.ScheduleEvent(EVENT_UNHOLYSHADOW, urandms(10,30));
-                            break;
-                    }
-                }
-
-                if (me->HasUnitState(UNIT_STATE_CASTING))
-                    return;
-                DoMeleeAttackIfReady();
-            }
-
-            void SpellHitTarget(Unit* /*target*/, SpellInfo const* spell) override
-            {
-                if (spell->Id == SPELL_UNHOLY_SHADOW)
-                    Talk(SAY_SPECIAL);
-            }
-        };
-
-        CreatureAI* GetAI(Creature* creature) const override
-        {
-            return GetInstanceAI<boss_four_horsemen_baronAI>(creature);
+            else
+                ResetEncounter();
         }
+        else
+            AttackStart(threat.GetCurrentVictim());
+
+        events.ScheduleEvent(EVENT_BERSERK, 10min);
+        events.ScheduleEvent(EVENT_MARK, 24s);
+        events.ScheduleEvent(EVENT_UNHOLYSHADOW, randtime(Seconds(3), Seconds(7)));
+    }
+
+    void _UpdateAI(uint32 diff) override
+    {
+        if (!_ourMovementFinished || !UpdateVictim())
+            return;
+        events.Update(diff);
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_BERSERK:
+                    DoCastAOE(SPELL_BERSERK, true);
+                    break;
+                case EVENT_MARK:
+                    DoCastAOE(SPELL_BARON_MARK, true);
+                    events.Repeat(Seconds(12));
+                    break;
+                case EVENT_UNHOLYSHADOW:
+                    DoCastVictim(SPELL_UNHOLY_SHADOW);
+                    events.Repeat(randtime(Seconds(10), Seconds(30)));
+                    break;
+            }
+        }
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+        DoMeleeAttackIfReady();
+    }
+
+    void SpellHitTarget(WorldObject* /*target*/, SpellInfo const* spellInfo) override
+    {
+        if (spellInfo->Id == SPELL_UNHOLY_SHADOW)
+            Talk(SAY_SPECIAL);
+    }
 };
 
-class boss_four_horsemen_thane : public CreatureScript
+struct boss_four_horsemen_thane : public boss_four_horsemen_baseAI
 {
-    public:
-        boss_four_horsemen_thane() : CreatureScript("boss_four_horsemen_thane") { }
-
-        struct boss_four_horsemen_thaneAI : public boss_four_horsemen_baseAI
+    boss_four_horsemen_thane(Creature* creature) : boss_four_horsemen_baseAI(creature, THANE, thanePath), _shouldSay(true) { }
+    void BeginFighting() override
+    {
+        SetCombatMovement(true);
+        me->SetReactState(REACT_AGGRESSIVE);
+        ThreatManager& threat = me->GetThreatManager();
+        if (threat.IsThreatListEmpty())
         {
-            boss_four_horsemen_thaneAI(Creature* creature) : boss_four_horsemen_baseAI(creature, THANE, thanePath), _shouldSay(true) { }
-            void BeginFighting() override
+            if (Unit* nearest = me->SelectNearestPlayer(5000.0f))
             {
-                SetCombatMovement(true);
-                me->SetReactState(REACT_AGGRESSIVE);
-                ThreatManager& threat = me->getThreatManager();
-                if (threat.isThreatListEmpty())
-                {
-                    if (Unit* nearest = me->SelectNearestPlayer(5000.0f))
-                    {
-                        me->AddThreat(nearest, 1.0f);
-                        AttackStart(nearest);
-                    }
-                    else
-                        ResetEncounter();
-                }
-                else
-                    AttackStart(threat.getHostilTarget());
-
-                events.ScheduleEvent(EVENT_BERSERK, 10 * MINUTE * IN_MILLISECONDS);
-                events.ScheduleEvent(EVENT_MARK, 24 * IN_MILLISECONDS);
-                events.ScheduleEvent(EVENT_METEOR, urandms(10,15));
+                AddThreat(nearest, 1.0f);
+                AttackStart(nearest);
             }
-            void _UpdateAI(uint32 diff) override
-            {
-                if (!_ourMovementFinished || !UpdateVictim())
-                    return;
-                events.Update(diff);
-
-                while (uint32 eventId = events.ExecuteEvent())
-                {
-                    switch (eventId)
-                    {
-                        case EVENT_BERSERK:
-                            DoCastAOE(SPELL_BERSERK, true);
-                            break;
-                        case EVENT_MARK:
-                            DoCastAOE(SPELL_THANE_MARK, true);
-                            events.ScheduleEvent(EVENT_MARK, 12 * IN_MILLISECONDS);
-                            break;
-                        case EVENT_METEOR:
-                            if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 0, 20.0f, true))
-                            {
-                                DoCast(target, SPELL_METEOR);
-                                _shouldSay = true;
-                            }
-                            events.ScheduleEvent(EVENT_METEOR, urandms(13,17));
-                            break;
-                    }
-                }
-
-                if (me->HasUnitState(UNIT_STATE_CASTING))
-                    return;
-                DoMeleeAttackIfReady();
-            }
-
-            void SpellHitTarget(Unit* /*target*/, SpellInfo const* spell) override
-            {
-                if (_shouldSay && spell->Id == SPELL_METEOR)
-                {
-                    Talk(SAY_SPECIAL);
-                    _shouldSay = false;
-                }
-            }
-
-            private:
-                bool _shouldSay; // throttle to make sure we only talk on first target hit by meteor
-        };
-
-        CreatureAI* GetAI(Creature* creature) const override
-        {
-            return GetInstanceAI<boss_four_horsemen_thaneAI>(creature);
+            else
+                ResetEncounter();
         }
+        else
+            AttackStart(threat.GetCurrentVictim());
+
+        events.ScheduleEvent(EVENT_BERSERK, 10min);
+        events.ScheduleEvent(EVENT_MARK, 24s);
+        events.ScheduleEvent(EVENT_METEOR, randtime(Seconds(10), Seconds(25)));
+    }
+    void _UpdateAI(uint32 diff) override
+    {
+        if (!_ourMovementFinished || !UpdateVictim())
+            return;
+        events.Update(diff);
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_BERSERK:
+                    DoCastAOE(SPELL_BERSERK, true);
+                    break;
+                case EVENT_MARK:
+                    DoCastAOE(SPELL_THANE_MARK, true);
+                    events.Repeat(Seconds(12));
+                    break;
+                case EVENT_METEOR:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 20.0f, true))
+                    {
+                        DoCast(target, SPELL_METEOR);
+                        _shouldSay = true;
+                    }
+                    events.Repeat(randtime(Seconds(13), Seconds(17)));
+                    break;
+            }
+        }
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+        DoMeleeAttackIfReady();
+    }
+
+    void SpellHitTarget(WorldObject* /*target*/, SpellInfo const* spellInfo) override
+    {
+        if (_shouldSay && spellInfo->Id == SPELL_METEOR)
+        {
+            Talk(SAY_SPECIAL);
+            _shouldSay = false;
+        }
+    }
+
+    private:
+        bool _shouldSay; // throttle to make sure we only talk on first target hit by meteor
 };
 
-class boss_four_horsemen_lady : public CreatureScript
+struct boss_four_horsemen_lady : public boss_four_horsemen_baseAI
 {
-    public:
-        boss_four_horsemen_lady() : CreatureScript("boss_four_horsemen_lady") { }
+    boss_four_horsemen_lady(Creature* creature) : boss_four_horsemen_baseAI(creature, LADY, ladyPath) { }
+    void BeginFighting() override
+    {
+        events.ScheduleEvent(EVENT_BERSERK, 10min);
+        events.ScheduleEvent(EVENT_MARK, 24s);
+        events.ScheduleEvent(EVENT_VOIDZONE, randtime(Seconds(5), Seconds(10)));
+    }
 
-        struct boss_four_horsemen_ladyAI : public boss_four_horsemen_baseAI
+    void _UpdateAI(uint32 diff) override
+    {
+        if (!me->IsInCombat())
+            return;
+        if (!_ourMovementFinished)
+            return;
+        if (me->GetThreatManager().IsThreatListEmpty())
         {
-            boss_four_horsemen_ladyAI(Creature* creature) : boss_four_horsemen_baseAI(creature, LADY, ladyPath) { }
-            void BeginFighting() override
-            {
-                events.ScheduleEvent(EVENT_BERSERK, 10 * MINUTE * IN_MILLISECONDS);
-                events.ScheduleEvent(EVENT_MARK, 24 * IN_MILLISECONDS);
-                events.ScheduleEvent(EVENT_VOIDZONE, urandms(5,10));
-            }
-
-            void _UpdateAI(uint32 diff) override
-            {
-                if (!me->IsInCombat())
-                    return;
-                if (!_ourMovementFinished)
-                    return;
-                if (me->getThreatManager().isThreatListEmpty())
-                {
-                    EnterEvadeMode(EVADE_REASON_NO_HOSTILES);
-                    return;
-                }
-
-                events.Update(diff);
-
-                while (uint32 eventId = events.ExecuteEvent())
-                {
-                    switch (eventId)
-                    {
-                        case EVENT_BERSERK:
-                            DoCastAOE(SPELL_BERSERK, true);
-                            break;
-                        case EVENT_MARK:
-                            DoCastAOE(SPELL_LADY_MARK, true);
-                            events.ScheduleEvent(EVENT_MARK, 15 * IN_MILLISECONDS);
-                            break;
-                        case EVENT_VOIDZONE:
-                            if (Unit* target = SelectTarget(SELECT_TARGET_RANDOM, 0, 45.0f, true))
-                            {
-                                DoCast(target, SPELL_VOID_ZONE, true);
-                                Talk(SAY_SPECIAL);
-                            }
-                            events.ScheduleEvent(EVENT_VOIDZONE, urandms(12, 18));
-                            break;
-                    }
-                }
-
-                if (me->HasUnitState(UNIT_STATE_CASTING))
-                    return;
-
-                if (Unit* target = SelectTarget(SELECT_TARGET_NEAREST, 0, 45.0f, true))
-                    DoCast(target, SPELL_SHADOW_BOLT);
-                else
-                {
-                    DoCastAOE(SPELL_UNYIELDING_PAIN);
-                    Talk(EMOTE_RAGECAST);
-                }
-            }
-        };
-
-        CreatureAI* GetAI(Creature* creature) const override
-        {
-            return GetInstanceAI<boss_four_horsemen_ladyAI>(creature);
+            EnterEvadeMode(EVADE_REASON_NO_HOSTILES);
+            return;
         }
+
+        events.Update(diff);
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_BERSERK:
+                    DoCastAOE(SPELL_BERSERK, true);
+                    break;
+                case EVENT_MARK:
+                    DoCastAOE(SPELL_LADY_MARK, true);
+                    events.Repeat(Seconds(15));
+                    break;
+                case EVENT_VOIDZONE:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::Random, 0, 45.0f, true))
+                    {
+                        DoCast(target, SPELL_VOID_ZONE, true);
+                        Talk(SAY_SPECIAL);
+                    }
+                    events.Repeat(randtime(Seconds(12), Seconds(18)));
+                    break;
+            }
+        }
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        if (Unit* target = SelectTarget(SelectTargetMethod::MinDistance, 0, 45.0f, true))
+            DoCast(target, SPELL_SHADOW_BOLT);
+        else
+        {
+            DoCastAOE(SPELL_UNYIELDING_PAIN);
+            Talk(EMOTE_RAGECAST);
+        }
+    }
 };
 
-class boss_four_horsemen_sir : public CreatureScript
+struct boss_four_horsemen_sir : public boss_four_horsemen_baseAI
 {
-    public:
-        boss_four_horsemen_sir() : CreatureScript("boss_four_horsemen_sir") { }
+    boss_four_horsemen_sir(Creature* creature) : boss_four_horsemen_baseAI(creature, SIR, sirPath), _shouldSay(true) { }
+    void BeginFighting() override
+    {
+        events.ScheduleEvent(EVENT_BERSERK, 10min);
+        events.ScheduleEvent(EVENT_MARK, 24s);
+        events.ScheduleEvent(EVENT_HOLYWRATH, randtime(Seconds(13), Seconds(18)));
+    }
 
-        struct boss_four_horsemen_sirAI : public boss_four_horsemen_baseAI
+    void _UpdateAI(uint32 diff) override
+    {
+        if (!me->IsInCombat())
+            return;
+        if (!_ourMovementFinished)
+            return;
+        if (me->GetThreatManager().IsThreatListEmpty())
         {
-            boss_four_horsemen_sirAI(Creature* creature) : boss_four_horsemen_baseAI(creature, SIR, sirPath), _shouldSay(true) { }
-            void BeginFighting() override
-            {
-                events.ScheduleEvent(EVENT_BERSERK, 10 * MINUTE * IN_MILLISECONDS);
-                events.ScheduleEvent(EVENT_MARK, 24 * IN_MILLISECONDS);
-                events.ScheduleEvent(EVENT_HOLYWRATH, urandms(13,18));
-            }
-
-            void _UpdateAI(uint32 diff) override
-            {
-                if (!me->IsInCombat())
-                    return;
-                if (!_ourMovementFinished)
-                    return;
-                if (me->getThreatManager().isThreatListEmpty())
-                {
-                    EnterEvadeMode(EVADE_REASON_NO_HOSTILES);
-                    return;
-                }
-
-                events.Update(diff);
-
-                while (uint32 eventId = events.ExecuteEvent())
-                {
-                    switch (eventId)
-                    {
-                        case EVENT_BERSERK:
-                            DoCastAOE(SPELL_BERSERK, true);
-                            break;
-                        case EVENT_MARK:
-                            DoCastAOE(SPELL_SIR_MARK, true);
-                            events.ScheduleEvent(EVENT_MARK, 15 * IN_MILLISECONDS);
-                            break;
-                        case EVENT_HOLYWRATH:
-                            if (Unit* target = SelectTarget(SELECT_TARGET_NEAREST, 0, 45.0f, true))
-                            {
-                                DoCast(target, SPELL_HOLY_WRATH, true);
-                                _shouldSay = true;
-                            }
-                            events.ScheduleEvent(EVENT_HOLYWRATH, urandms(10,18));
-                            break;
-                    }
-                }
-
-                if (me->HasUnitState(UNIT_STATE_CASTING))
-                    return;
-
-                if (Unit* target = SelectTarget(SELECT_TARGET_NEAREST, 0, 45.0f, true))
-                    DoCast(target, SPELL_HOLY_BOLT);
-                else
-                {
-                    DoCastAOE(SPELL_CONDEMNATION);
-                    Talk(EMOTE_RAGECAST);
-                }
-            }
-
-            void SpellHitTarget(Unit* /*target*/, SpellInfo const* spell) override
-            {
-                if (_shouldSay && spell->Id == SPELL_HOLY_WRATH)
-                {
-                    Talk(SAY_SPECIAL);
-                    _shouldSay = false;
-                }
-            }
-
-            private:
-                bool _shouldSay; // throttle to make sure we only talk on first target hit by holy wrath
-        };
-
-        CreatureAI* GetAI(Creature* creature) const override
-        {
-            return GetInstanceAI<boss_four_horsemen_sirAI>(creature);
+            EnterEvadeMode(EVADE_REASON_NO_HOSTILES);
+            return;
         }
+
+        events.Update(diff);
+
+        while (uint32 eventId = events.ExecuteEvent())
+        {
+            switch (eventId)
+            {
+                case EVENT_BERSERK:
+                    DoCastAOE(SPELL_BERSERK, true);
+                    break;
+                case EVENT_MARK:
+                    DoCastAOE(SPELL_SIR_MARK, true);
+                    events.Repeat(Seconds(15));
+                    break;
+                case EVENT_HOLYWRATH:
+                    if (Unit* target = SelectTarget(SelectTargetMethod::MinDistance, 0, 45.0f, true))
+                    {
+                        DoCast(target, SPELL_HOLY_WRATH, true);
+                        _shouldSay = true;
+                    }
+                    events.Repeat(randtime(Seconds(10), Seconds(18)));
+                    break;
+            }
+        }
+
+        if (me->HasUnitState(UNIT_STATE_CASTING))
+            return;
+
+        if (Unit* target = SelectTarget(SelectTargetMethod::MinDistance, 0, 45.0f, true))
+            DoCast(target, SPELL_HOLY_BOLT);
+        else
+        {
+            DoCastAOE(SPELL_CONDEMNATION);
+            Talk(EMOTE_RAGECAST);
+        }
+    }
+
+    void SpellHitTarget(WorldObject* /*target*/, SpellInfo const* spellInfo) override
+    {
+        if (_shouldSay && spellInfo->Id == SPELL_HOLY_WRATH)
+        {
+            Talk(SAY_SPECIAL);
+            _shouldSay = false;
+        }
+    }
+
+    private:
+        bool _shouldSay; // throttle to make sure we only talk on first target hit by holy wrath
 };
 
-class spell_four_horsemen_mark : public SpellScriptLoader
+// 28832 - Mark of Korth'azz
+// 28833 - Mark of Blaumeux
+// 28834 - Mark of Rivendare
+// 28835 - Mark of Zeliek
+class spell_four_horsemen_mark : public AuraScript
 {
-    public:
-        spell_four_horsemen_mark() : SpellScriptLoader("spell_four_horsemen_mark") { }
+    PrepareAuraScript(spell_four_horsemen_mark);
 
-        class spell_four_horsemen_mark_AuraScript : public AuraScript
+    void OnApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
+    {
+        if (Unit* caster = GetCaster())
         {
-            PrepareAuraScript(spell_four_horsemen_mark_AuraScript);
-
-            void OnApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
+            int32 damage;
+            switch (GetStackAmount())
             {
-                if (Unit* caster = GetCaster())
-                {
-                    int32 damage;
-                    switch (GetStackAmount())
-                    {
-                        case 1:
-                            damage = 0;
-                            break;
-                        case 2:
-                            damage = 500;
-                            break;
-                        case 3:
-                            damage = 1000;
-                            break;
-                        case 4:
-                            damage = 1500;
-                            break;
-                        case 5:
-                            damage = 4000;
-                            break;
-                        case 6:
-                            damage = 12000;
-                            break;
-                        default:
-                            damage = 20000 + 1000 * (GetStackAmount() - 7);
-                            break;
-                    }
-                    if (damage)
-                        caster->CastCustomSpell(SPELL_MARK_DAMAGE, SPELLVALUE_BASE_POINT0, damage, GetTarget());
-                }
+                case 1:
+                    damage = 0;
+                    break;
+                case 2:
+                    damage = 500;
+                    break;
+                case 3:
+                    damage = 1000;
+                    break;
+                case 4:
+                    damage = 1500;
+                    break;
+                case 5:
+                    damage = 4000;
+                    break;
+                case 6:
+                    damage = 12000;
+                    break;
+                default:
+                    damage = 20000 + 1000 * (GetStackAmount() - 7);
+                    break;
             }
-
-            void Register() override
+            if (damage)
             {
-                AfterEffectApply += AuraEffectApplyFn(spell_four_horsemen_mark_AuraScript::OnApply, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL_OR_REAPPLY_MASK);
+                CastSpellExtraArgs args(TRIGGERED_FULL_MASK);
+                args.AddSpellBP0(damage);
+                caster->CastSpell(GetTarget(), SPELL_MARK_DAMAGE, args);
             }
-        };
-
-        AuraScript* GetAuraScript() const override
-        {
-            return new spell_four_horsemen_mark_AuraScript();
         }
+    }
+
+    void Register() override
+    {
+        AfterEffectApply += AuraEffectApplyFn(spell_four_horsemen_mark::OnApply, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL_OR_REAPPLY_MASK);
+    }
 };
 
 void AddSC_boss_four_horsemen()
 {
-    new boss_four_horsemen_baron();
-    new boss_four_horsemen_thane();
-    new boss_four_horsemen_lady();
-    new boss_four_horsemen_sir();
-    new spell_four_horsemen_mark();
+    RegisterNaxxramasCreatureAI(boss_four_horsemen_baron);
+    RegisterNaxxramasCreatureAI(boss_four_horsemen_thane);
+    RegisterNaxxramasCreatureAI(boss_four_horsemen_lady);
+    RegisterNaxxramasCreatureAI(boss_four_horsemen_sir);
+    RegisterSpellScript(spell_four_horsemen_mark);
 }

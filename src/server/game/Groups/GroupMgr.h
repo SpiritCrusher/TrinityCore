@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -20,7 +20,7 @@
 
 #include "Group.h"
 
-class GroupMgr
+class TC_GAME_API GroupMgr
 {
 private:
     GroupMgr();
@@ -32,7 +32,7 @@ public:
     typedef std::map<ObjectGuid::LowType, Group*> GroupContainer;
     typedef std::vector<Group*>      GroupDbContainer;
 
-    Group* GetGroupByGUID(ObjectGuid::LowType guid) const;
+    Group* GetGroupByGUID(ObjectGuid const& guid) const;
 
     uint32 GenerateNewGroupDbStoreId();
     void   RegisterGroupDbStoreId(uint32 storageId, Group* group);
@@ -41,11 +41,12 @@ public:
     Group* GetGroupByDbStoreId(uint32 storageId) const;
     void   SetGroupDbStoreSize(uint32 newSize) { GroupDbStore.resize(newSize); }
 
+    void Update(uint32 diff);
+
     void   LoadGroups();
     ObjectGuid::LowType GenerateGroupId();
     void   AddGroup(Group* group);
     void   RemoveGroup(Group* group);
-
 
 protected:
     ObjectGuid::LowType           NextGroupId;

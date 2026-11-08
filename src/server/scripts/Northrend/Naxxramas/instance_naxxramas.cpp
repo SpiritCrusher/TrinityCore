@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2016 TrinityCore <http://www.trinitycore.org/>
+ * This file is part of the TrinityCore Project. See AUTHORS file for Copyright information
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -16,11 +16,15 @@
  */
 
 #include "ScriptMgr.h"
-#include "ScriptedCreature.h"
+#include "AreaBoundary.h"
+#include "CreatureAI.h"
+#include "GameObject.h"
 #include "InstanceScript.h"
+#include "Map.h"
 #include "naxxramas.h"
+#include "TemporarySummon.h"
 
-BossBoundaryData const boundaries = 
+BossBoundaryData const boundaries =
 {
     /* Arachnid Quarter */
     { BOSS_ANUBREKHAN, new CircleBoundary(Position(3273.376709f, -3475.876709f), Position(3195.668213f, -3475.930176f)) },
@@ -36,7 +40,7 @@ BossBoundaryData const boundaries =
     /* Military Quarter */
     { BOSS_RAZUVIOUS, new ZRangeBoundary(260.0f, 287.0f) }, // will not chase onto the upper floor
     { BOSS_GOTHIK, new RectangleBoundary(2627.0f, 2764.0f, -3440.0f, -3275.0f) },
-    { BOSS_HORSEMEN, new ParallelogramBoundary(AreaBoundary::DoublePosition(2646.0, -2959.0), AreaBoundary::DoublePosition(2529.0, -3075.0), AreaBoundary::DoublePosition(2506.0, -2854.0)) },
+    { BOSS_HORSEMEN, new ParallelogramBoundary(Position(2646.0f, -2959.0f), Position(2529.0f, -3075.0f), Position(2506.0f, -2854.0f)) },
 
     /* Construct Quarter */
     { BOSS_PATCHWERK, new CircleBoundary(Position(3204.0f, -3241.4f), 240.0f) },
@@ -44,9 +48,9 @@ BossBoundaryData const boundaries =
     { BOSS_GROBBULUS, new CircleBoundary(Position(3204.0f, -3241.4f), 240.0f) },
     { BOSS_GROBBULUS, new RectangleBoundary(3295.0f, 3340.0f, -3254.2f, -3230.18f, true) }, // entrance door blocker
     { BOSS_GLUTH, new CircleBoundary(Position(3293.0f, -3142.0f), 80.0) },
-    { BOSS_GLUTH, new ParallelogramBoundary(AreaBoundary::DoublePosition(3401.0, -3149.0), AreaBoundary::DoublePosition(3261.0, -3028.0), AreaBoundary::DoublePosition(3320.0, -3267.0)) },
+    { BOSS_GLUTH, new ParallelogramBoundary(Position(3401.0f, -3149.0f), Position(3261.0f, -3028.0f), Position(3320.0f, -3267.0f)) },
     { BOSS_GLUTH, new ZRangeBoundary(285.0f, 310.0f) },
-    { BOSS_THADDIUS, new ParallelogramBoundary(AreaBoundary::DoublePosition(3478.3, -3070.0), AreaBoundary::DoublePosition(3370.0, -2961.5), AreaBoundary::DoublePosition(3580.0, -2961.5)) },
+    { BOSS_THADDIUS, new ParallelogramBoundary(Position(3478.3f, -3070.0f), Position(3370.0f, -2961.5f), Position(3580.0f, -2961.5f)) },
 
     /* Frostwyrm Lair */
     { BOSS_SAPPHIRON, new CircleBoundary(Position(3517.627f, -5255.5f), 110.0) },
@@ -97,47 +101,18 @@ ObjectData const objectData[] =
     { GO_NAXX_PORTAL_CONSTRUCT, DATA_NAXX_PORTAL_CONSTRUCT },
     { GO_NAXX_PORTAL_PLAGUE,    DATA_NAXX_PORTAL_PLAGUE    },
     { GO_NAXX_PORTAL_MILITARY,  DATA_NAXX_PORTAL_MILITARY  },
+    { GO_KELTHUZAD_THRONE,      DATA_KELTHUZAD_THRONE      },
     { 0,                        0,                         }
 };
-
-// from P2 teleport spell stored target
-float const HeiganPos[2] = { 2793.86f, -3707.38f };
-float const HeiganEruptionSlope[3] =
-{
-    (-3703.303223f - HeiganPos[1]) / (2777.494141f - HeiganPos[0]), // between right center and far right
-    (-3696.948242f - HeiganPos[1]) / (2785.624268f - HeiganPos[0]), // between left and right halves
-    (-3691.880615f - HeiganPos[1]) / (2790.280029f - HeiganPos[0]) // between far left and left center
-};
-
-// 0  H      x
-//  1        ^
-//   2       |
-//    3  y<--o
-inline uint32 GetEruptionSection(float x, float y)
-{
-    y -= HeiganPos[1];
-    if (y < 1.0f)
-        return 0;
-
-    x -= HeiganPos[0];
-    if (x > -1.0f)
-        return 3;
-
-    float slope = y/x;
-    for (uint32 i = 0; i < 3; ++i)
-        if (slope > HeiganEruptionSlope[i])
-            return i;
-    return 3;
-}
 
 class instance_naxxramas : public InstanceMapScript
 {
     public:
-        instance_naxxramas() : InstanceMapScript("instance_naxxramas", 533) { }
+        instance_naxxramas() : InstanceMapScript(NaxxramasScriptName, 533) { }
 
         struct instance_naxxramas_InstanceMapScript : public InstanceScript
         {
-            instance_naxxramas_InstanceMapScript(Map* map) : InstanceScript(map)
+            instance_naxxramas_InstanceMapScript(InstanceMap* map) : InstanceScript(map)
             {
                 SetHeaders(DataHeader);
                 SetBossNumber(EncounterCount);
@@ -145,13 +120,10 @@ class instance_naxxramas : public InstanceMapScript
                 LoadDoorData(doorData);
                 LoadObjectData(nullptr, objectData);
 
-                AbominationCount        = 0;
-                hadAnubRekhanGreet      = false;
-                hadFaerlinaGreet        = false;
-                hadThaddiusGreet        = false;
+                hadSapphironBirth       = false;
                 CurrentWingTaunt        = SAY_KELTHUZAD_FIRST_WING_TAUNT;
 
-                playerDied              = 0;
+                playerDied              = false;
             }
 
             void OnCreatureCreate(Creature* creature) override
@@ -182,6 +154,9 @@ class instance_naxxramas : public InstanceMapScript
                     case NPC_SIR:
                         SirGUID = creature->GetGUID();
                         break;
+                    case NPC_GLUTH:
+                        GluthGUID = creature->GetGUID();
+                        break;
                     case NPC_HEIGAN:
                         HeiganGUID = creature->GetGUID();
                         break;
@@ -208,28 +183,8 @@ class instance_naxxramas : public InstanceMapScript
                 }
             }
 
-            void ProcessEvent(WorldObject* /*source*/, uint32 eventId) override
-            {
-                switch (eventId)
-                {
-                    case EVENT_THADDIUS_BEGIN_RESET:
-                        if (GetBossState(BOSS_THADDIUS) == SPECIAL) // this is the initial spawn, we want a shorter spawn time
-                            events.ScheduleEvent(EVENT_THADDIUS_RESET, 5 * IN_MILLISECONDS);
-                        else
-                            events.ScheduleEvent(EVENT_THADDIUS_RESET, 30 * IN_MILLISECONDS);
-                        break;
-                }
-            }
-
             void OnGameObjectCreate(GameObject* go) override
             {
-                if (go->GetGOInfo()->displayId == 6785 || go->GetGOInfo()->displayId == 1287)
-                {
-                    uint32 section = GetEruptionSection(go->GetPositionX(), go->GetPositionY());
-                    HeiganEruptionGUID[section].insert(go->GetGUID());
-                    return;
-                }
-
                 switch (go->GetEntry())
                 {
                     case GO_GOTHIK_GATE:
@@ -259,19 +214,30 @@ class instance_naxxramas : public InstanceMapScript
                         break;
                     case GO_NAXX_PORTAL_ARACHNID:
                         if (GetBossState(BOSS_MAEXXNA) == DONE)
-                            go->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                            go->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
                         break;
                     case GO_NAXX_PORTAL_CONSTRUCT:
                         if (GetBossState(BOSS_THADDIUS) == DONE)
-                            go->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                            go->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
                         break;
                     case GO_NAXX_PORTAL_PLAGUE:
                         if (GetBossState(BOSS_LOATHEB) == DONE)
-                            go->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                            go->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
                         break;
                     case GO_NAXX_PORTAL_MILITARY:
                         if (GetBossState(BOSS_HORSEMEN) == DONE)
-                            go->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                            go->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
+                        break;
+                    case GO_KELTHUZAD_THRONE:
+                        if (GetBossState(BOSS_KELTHUZAD) == DONE)
+                            go->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
+                        break;
+                    case GO_BIRTH:
+                        if (hadSapphironBirth || GetBossState(BOSS_SAPPHIRON) == DONE)
+                        {
+                            hadSapphironBirth = true;
+                            go->Delete();
+                        }
                         break;
                     default:
                         break;
@@ -280,37 +246,11 @@ class instance_naxxramas : public InstanceMapScript
                 InstanceScript::OnGameObjectCreate(go);
             }
 
-            void OnGameObjectRemove(GameObject* go) override
-            {
-                if (go->GetGOInfo()->displayId == 6785 || go->GetGOInfo()->displayId == 1287)
-                {
-                    uint32 section = GetEruptionSection(go->GetPositionX(), go->GetPositionY());
-                    HeiganEruptionGUID[section].erase(go->GetGUID());
-                    return;
-                }
-
-                switch (go->GetEntry())
-                {
-                    case GO_BIRTH:
-                        if (SapphironGUID)
-                        {
-                            if (Creature* sapphiron = instance->GetCreature(SapphironGUID))
-                                sapphiron->AI()->DoAction(DATA_SAPPHIRON_BIRTH);
-                            return;
-                        }
-                        break;
-                    default:
-                        break;
-                }
-
-                InstanceScript::OnGameObjectRemove(go);
-            }
-
             void OnUnitDeath(Unit* unit) override
             {
-                if (unit->GetTypeId() == TYPEID_PLAYER && IsEncounterInProgress())
+                if (!playerDied && unit->IsPlayer() && IsEncounterInProgress())
                 {
-                    playerDied = 1;
+                    playerDied = true;
                     SaveToDB();
                 }
 
@@ -328,24 +268,12 @@ class instance_naxxramas : public InstanceMapScript
             {
                 switch (id)
                 {
-                    case DATA_HEIGAN_ERUPT:
-                        HeiganErupt(value);
-                        break;
                     case DATA_GOTHIK_GATE:
                         if (GameObject* gate = instance->GetGameObject(GothikGateGUID))
                             gate->SetGoState(GOState(value));
                         break;
-                    case DATA_ABOMINATION_KILLED:
-                        AbominationCount = value;
-                        break;
-                    case DATA_HAD_ANUBREKHAN_GREET:
-                        hadAnubRekhanGreet = (value == 1u);
-                        break;
-                    case DATA_HAD_FAERLINA_GREET:
-                        hadFaerlinaGreet = (value == 1u);
-                        break;
-                    case DATA_HAD_THADDIUS_GREET:
-                        hadThaddiusGreet = (value == 1u);
+                    case DATA_HAD_SAPPHIRON_BIRTH:
+                        hadSapphironBirth = (value == 1u);
                         break;
                     default:
                         break;
@@ -356,14 +284,8 @@ class instance_naxxramas : public InstanceMapScript
             {
                 switch (id)
                 {
-                    case DATA_ABOMINATION_KILLED:
-                        return AbominationCount;
-                    case DATA_HAD_ANUBREKHAN_GREET:
-                        return hadAnubRekhanGreet ? 1u : 0u;
-                    case DATA_HAD_FAERLINA_GREET:
-                        return hadFaerlinaGreet ? 1u : 0u;
-                    case DATA_HAD_THADDIUS_GREET:
-                        return hadThaddiusGreet ? 1u : 0u;
+                    case DATA_HAD_SAPPHIRON_BIRTH:
+                        return hadSapphironBirth ? 1u : 0u;
                     default:
                         break;
                 }
@@ -393,12 +315,16 @@ class instance_naxxramas : public InstanceMapScript
                         return SirGUID;
                     case DATA_HEIGAN:
                         return HeiganGUID;
+                    case DATA_GLUTH:
+                        return GluthGUID;
                     case DATA_FEUGEN:
                         return FeugenGUID;
                     case DATA_STALAGG:
                         return StalaggGUID;
                     case DATA_THADDIUS:
                         return ThaddiusGUID;
+                    case DATA_SAPPHIRON:
+                        return SapphironGUID;
                     case DATA_KELTHUZAD:
                         return KelthuzadGUID;
                     case DATA_KELTHUZAD_PORTAL01:
@@ -429,32 +355,32 @@ class instance_naxxramas : public InstanceMapScript
                         if (state == DONE)
                         {
                             if (GameObject* teleporter = GetGameObject(DATA_NAXX_PORTAL_ARACHNID))
-                                teleporter->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                                teleporter->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
 
-                            events.ScheduleEvent(EVENT_KELTHUZAD_WING_TAUNT, 6000);
+                            events.ScheduleEvent(EVENT_KELTHUZAD_WING_TAUNT, 6s);
                         }
                         break;
                     case BOSS_LOATHEB:
                         if (state == DONE)
                         {
                             if (GameObject* teleporter = GetGameObject(DATA_NAXX_PORTAL_PLAGUE))
-                                teleporter->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                                teleporter->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
 
-                            events.ScheduleEvent(EVENT_KELTHUZAD_WING_TAUNT, 6000);
+                            events.ScheduleEvent(EVENT_KELTHUZAD_WING_TAUNT, 6s);
                         }
                         break;
                     case BOSS_THADDIUS:
                         if (state == DONE)
                         {
                             if (GameObject* teleporter = GetGameObject(DATA_NAXX_PORTAL_CONSTRUCT))
-                                teleporter->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                                teleporter->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
 
-                            events.ScheduleEvent(EVENT_KELTHUZAD_WING_TAUNT, 6000);
+                            events.ScheduleEvent(EVENT_KELTHUZAD_WING_TAUNT, 6s);
                         }
                         break;
                     case BOSS_GOTHIK:
                         if (state == DONE)
-                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_KORTHAZZ, 10000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_KORTHAZZ, 10s);
                         break;
                     case BOSS_HORSEMEN:
                         if (state == DONE)
@@ -462,18 +388,24 @@ class instance_naxxramas : public InstanceMapScript
                             if (GameObject* horsemenChest = instance->GetGameObject(HorsemenChestGUID))
                             {
                                 horsemenChest->SetRespawnTime(horsemenChest->GetRespawnDelay());
-                                horsemenChest->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                                horsemenChest->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
                             }
 
                             if (GameObject* teleporter = GetGameObject(DATA_NAXX_PORTAL_MILITARY))
-                                teleporter->RemoveFlag(GAMEOBJECT_FLAGS, GO_FLAG_NOT_SELECTABLE);
+                                teleporter->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
 
-                            events.ScheduleEvent(EVENT_KELTHUZAD_WING_TAUNT, 6000);
+                            events.ScheduleEvent(EVENT_KELTHUZAD_WING_TAUNT, 6s);
                         }
                         break;
                     case BOSS_SAPPHIRON:
                         if (state == DONE)
-                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD, 6s);
+                        HandleGameObject(KelthuzadDoorGUID, false);
+                        break;
+                    case BOSS_KELTHUZAD:
+                        if (state == DONE)
+                            if (GameObject* throne = GetGameObject(DATA_KELTHUZAD_THRONE))
+                                throne->RemoveFlag(GO_FLAG_NOT_SELECTABLE);
                         break;
                     default:
                         break;
@@ -493,37 +425,37 @@ class instance_naxxramas : public InstanceMapScript
                         case EVENT_DIALOGUE_GOTHIK_KORTHAZZ:
                             if (Creature* korthazz = instance->GetCreature(ThaneGUID))
                                 korthazz->AI()->Talk(SAY_DIALOGUE_GOTHIK_HORSEMAN);
-                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_ZELIEK, 5000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_ZELIEK, 5s);
                             break;
                         case EVENT_DIALOGUE_GOTHIK_ZELIEK:
                             if (Creature* zeliek = instance->GetCreature(SirGUID))
                                 zeliek->AI()->Talk(SAY_DIALOGUE_GOTHIK_HORSEMAN);
-                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_BLAUMEUX, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_BLAUMEUX, 6s);
                             break;
                         case EVENT_DIALOGUE_GOTHIK_BLAUMEUX:
                             if (Creature* blaumeux = instance->GetCreature(LadyGUID))
                                 blaumeux->AI()->Talk(SAY_DIALOGUE_GOTHIK_HORSEMAN);
-                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_RIVENDARE, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_RIVENDARE, 6s);
                             break;
                         case EVENT_DIALOGUE_GOTHIK_RIVENDARE:
                             if (Creature* rivendare = instance->GetCreature(BaronGUID))
                                 rivendare->AI()->Talk(SAY_DIALOGUE_GOTHIK_HORSEMAN);
-                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_BLAUMEUX2, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_BLAUMEUX2, Seconds(6));
                             break;
                         case EVENT_DIALOGUE_GOTHIK_BLAUMEUX2:
                             if (Creature* blaumeux = instance->GetCreature(LadyGUID))
                                 blaumeux->AI()->Talk(SAY_DIALOGUE_GOTHIK_HORSEMAN2);
-                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_ZELIEK2, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_ZELIEK2, Seconds(6));
                             break;
                         case EVENT_DIALOGUE_GOTHIK_ZELIEK2:
                             if (Creature* zeliek = instance->GetCreature(SirGUID))
                                 zeliek->AI()->Talk(SAY_DIALOGUE_GOTHIK_HORSEMAN2);
-                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_KORTHAZZ2, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_KORTHAZZ2, Seconds(6));
                             break;
                         case EVENT_DIALOGUE_GOTHIK_KORTHAZZ2:
                             if (Creature* korthazz = instance->GetCreature(ThaneGUID))
                                 korthazz->AI()->Talk(SAY_DIALOGUE_GOTHIK_HORSEMAN2);
-                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_RIVENDARE2, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_GOTHIK_RIVENDARE2, Seconds(6));
                             break;
                         case EVENT_DIALOGUE_GOTHIK_RIVENDARE2:
                             if (Creature* rivendare = instance->GetCreature(BaronGUID))
@@ -539,59 +471,35 @@ class instance_naxxramas : public InstanceMapScript
                         case EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD:
                             if (Creature* kelthuzad = instance->GetCreature(KelthuzadGUID))
                                 kelthuzad->AI()->Talk(SAY_DIALOGUE_SAPPHIRON_KELTHUZAD);
-                            HandleGameObject(KelthuzadDoorGUID, false);
-                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_LICHKING, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_LICHKING, 6s);
                             break;
                         case EVENT_DIALOGUE_SAPPHIRON_LICHKING:
                             if (Creature* lichKing = instance->GetCreature(LichKingGUID))
                                 lichKing->AI()->Talk(SAY_DIALOGUE_SAPPHIRON_LICH_KING);
-                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD2, 16000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD2, Seconds(16));
                             break;
                         case EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD2:
                             if (Creature* kelthuzad = instance->GetCreature(KelthuzadGUID))
                                 kelthuzad->AI()->Talk(SAY_DIALOGUE_SAPPHIRON_KELTHUZAD2);
-                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_LICHKING2, 9000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_LICHKING2, Seconds(9));
                             break;
                         case EVENT_DIALOGUE_SAPPHIRON_LICHKING2:
                             if (Creature* lichKing = instance->GetCreature(LichKingGUID))
                                 lichKing->AI()->Talk(SAY_DIALOGUE_SAPPHIRON_LICH_KING2);
-                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD3, 12000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD3, Seconds(12));
                             break;
                         case EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD3:
                             if (Creature* kelthuzad = instance->GetCreature(KelthuzadGUID))
                                 kelthuzad->AI()->Talk(SAY_DIALOGUE_SAPPHIRON_KELTHUZAD3);
-                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD4, 6000);
+                            events.ScheduleEvent(EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD4, Seconds(6));
                             break;
                         case EVENT_DIALOGUE_SAPPHIRON_KELTHUZAD4:
                             if (Creature* kelthuzad = instance->GetCreature(KelthuzadGUID))
                                 kelthuzad->AI()->Talk(SAY_DIALOGUE_SAPPHIRON_KELTHUZAD4);
                             HandleGameObject(KelthuzadDoorGUID, true);
                             break;
-                        case EVENT_THADDIUS_RESET:
-                            if (GetBossState(BOSS_THADDIUS) != DONE)
-                                if (Creature* thaddius = instance->GetCreature(ThaddiusGUID))
-                                    thaddius->AI()->DoAction(-1);
-                            break;
                         default:
                             break;
-                    }
-                }
-            }
-
-            void HeiganErupt(uint32 section)
-            {
-                for (uint32 i = 0; i < 4; ++i)
-                {
-                    if (i == section)
-                        continue;
-
-                    for (ObjectGuid guid : HeiganEruptionGUID[i])
-                    {
-                        if (GameObject* heiganEruption = instance->GetGameObject(guid))
-                        {
-                            heiganEruption->SendCustomAnim(heiganEruption->GetGoAnimProgress());
-                            heiganEruption->CastSpell(NULL, SPELL_ERUPTION);
-                        }
                     }
                 }
             }
@@ -611,7 +519,7 @@ class instance_naxxramas : public InstanceMapScript
                 return true;
             }
 
-            bool CheckAchievementCriteriaMeet(uint32 criteria_id, Player const* /*source*/, Unit const* /*target = NULL*/, uint32 /*miscvalue1 = 0*/) override
+            bool CheckAchievementCriteriaMeet(uint32 criteria_id, Player const* /*source*/, Unit const* /*target = nullptr*/, uint32 /*miscvalue1 = 0*/) override
             {
                 switch (criteria_id)
                 {
@@ -644,6 +552,18 @@ class instance_naxxramas : public InstanceMapScript
                 return false;
             }
 
+            void WriteSaveDataMore(std::ostringstream& data) override
+            {
+                data << uint32(playerDied ? 1 : 0);
+            }
+
+            void ReadSaveDataMore(std::istringstream& data) override
+            {
+                uint32 tmpState;
+                data >> tmpState;
+                playerDied = tmpState != 0;
+            }
+
         protected:
             /* The Arachnid Quarter */
             // Anub'rekhan
@@ -653,7 +573,6 @@ class instance_naxxramas : public InstanceMapScript
 
             /* The Plague Quarter */
             // Heigan the Unclean
-            GuidSet HeiganEruptionGUID[4];
             ObjectGuid HeiganGUID;
 
             /* The Military Quarter */
@@ -670,6 +589,8 @@ class instance_naxxramas : public InstanceMapScript
             ObjectGuid HorsemenChestGUID;
 
             /* The Construct Quarter */
+            // Gluth
+            ObjectGuid GluthGUID;
             // Thaddius
             ObjectGuid ThaddiusGUID;
             ObjectGuid FeugenGUID;
@@ -684,14 +605,11 @@ class instance_naxxramas : public InstanceMapScript
             ObjectGuid PortalsGUID[4];
             ObjectGuid KelthuzadDoorGUID;
             ObjectGuid LichKingGUID;
-            uint8 AbominationCount;
-            bool hadAnubRekhanGreet;
-            bool hadFaerlinaGreet;
-            bool hadThaddiusGreet;
+            bool hadSapphironBirth;
             uint8 CurrentWingTaunt;
 
             /* The Immortal / The Undying */
-            uint32 playerDied;
+            bool playerDied;
 
             EventMap events;
         };
